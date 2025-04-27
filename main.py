@@ -46,29 +46,46 @@ def format_chat_history(history_dict: Dict) -> str:
     """Format the chat history into a readable text format."""
     formatted_text = "CONVERSATION HISTORY\n\n"
     
-    # Check for the LiveKit 1.0 "items" format
-    if history_dict and "items" in history_dict:
-        logger.info(f"Formatting chat history with {len(history_dict['items'])} items")
+    if not history_dict:
+        logger.warning("Empty history dictionary provided")
+        return formatted_text + "No conversation history available."
+    
+    # Process items according to LiveKit 1.0 format
+    items = history_dict.get("items", [])
+    if items:
+        logger.info(f"Formatting chat history with {len(items)} items")
         
-        # Format each message in the items array
-        for i, item in enumerate(history_dict.get("items", [])):
-            # Only process message items
-            if item.type != "message":
-                continue
-                
-            role = item.role.upper()
-            content = item.content
-            
+        for i, item in enumerate(items):
             # Add separator between messages for readability
             if i > 0:
                 formatted_text += "-" * 40 + "\n"
-                
-            formatted_text += f"{role}: {content}\n\n"
+            
+            # Extract role and content properly based on LiveKit's structure
+            role = item.get("role", "UNKNOWN").upper()
+            
+            # Handle text content
+            text_content = ""
+            if isinstance(item.get("text"), str):
+                text_content = item.get("text")
+            elif isinstance(item.get("content"), list):
+                # Handle content array
+                for content_item in item.get("content", []):
+                    if isinstance(content_item, str):
+                        text_content += content_item + " "
+            
+            formatted_text += f"{role}: {text_content.strip()}\n\n"
+            
+            # If there are additional content items (like images, audio), note them
+            if isinstance(item.get("content"), list):
+                for content_item in item.get("content", []):
+                    if isinstance(content_item, dict) and "type" in content_item:
+                        content_type = content_item.get("type", "unknown")
+                        formatted_text += f"[{content_type} content included]\n"
         
         return formatted_text
     
     # No recognized format
-    logger.warning(f"No recognized history format found")
+    logger.warning("No recognized history format found")
     return formatted_text + "No conversation history available in a recognized format."
 
 
@@ -117,8 +134,9 @@ def send_email(receiver_email: str, subject: str, body: str) -> bool:
 async def generate_conversation_summary(history_dict: Dict) -> str:
     """Generate a semantic summary of the conversation history using OpenAI."""
     try:
-        # Format the history for the LLM
+        # Format the history using the updated formatter
         formatted_history = format_chat_history(history_dict)
+        logger.info("Formatted conversation history for summary generation")
         
         # Get the API key from environment
         api_key = os.environ.get("OPENAI_API_KEY")
@@ -310,23 +328,26 @@ class ApiQueryAgent(Agent):
         logger.info(f"Sending {'summary' if send_summary else 'transcript'} to: {receiver_email}")
         
         try:
-            # Get chat history from the session
+            # Get chat history directly from session history property per LiveKit docs
             history_dict = {}
-            if hasattr(context.session, 'chat_ctx') and context.session.chat_ctx:
-                history_dict = {"items": context.session.chat_ctx.items}
+            if hasattr(context.session, 'history'):
+                history_dict = context.session.history.to_dict()
+                logger.info(f"Retrieved conversation history with {len(history_dict.get('items', []))} items")
+            else:
+                logger.warning("Session does not have history property - this may be a LiveKit API version issue")
             
             # Generate content based on preference
             if send_summary:
                 content = await generate_conversation_summary(history_dict)
-                subject = "Summary of Your Conversation about Tech Products"
-                intro = "Here's a summary of our conversation about tech products:"
+                subject = "Summary of Your Conversation with Carema Assistant"
+                intro = "Here's a summary of our conversation about Carema products:"
             else:
                 content = format_chat_history(history_dict)
-                subject = "Your Conversation about Tech Products"
-                intro = "Here's the transcript of our conversation about tech products:"
+                subject = "Transcript of Your Conversation with Carema Assistant"
+                intro = "Here's the complete transcript of our conversation about Carema products:"
             
             # Format email
-            body = f"Hello,\n\n{intro}\n\n{content}\n\nBest regards,\nYour Tech Product Assistant"
+            body = f"Hello,\n\n{intro}\n\n{content}\n\nBest regards,\nYour Carema Product Assistant"
             
             # Send email
             success = send_email(receiver_email, subject, body)
@@ -544,13 +565,47 @@ async def entrypoint(ctx: JobContext):
     @session.on("function_call")
     def _on_function_call(event):
         logger.info(f"Function tool started: {event.function.name}")
+    
+    @session.on("conversation_item_added")
+    def _on_conversation_item_added(event):
+        """Track conversation items as they are added."""
+        logger.info(f"Conversation item added: {event.item.role}")
+        
+        # You can use this to track the conversation in real-time
+        # This helps maintain context about what's been discussed
+        try:
+            text_content = ""
+            if hasattr(event.item, 'text_content'):
+                text_content = event.item.text_content
+            logger.info(f"Item content: {text_content[:50]}{'...' if len(text_content) > 50 else ''}")
+        except Exception as e:
+            logger.error(f"Error processing conversation item: {e}")
 
     async def log_usage():
         summary = usage_collector.get_summary()
         logger.info(f"Usage: {summary}")
+    
+    async def save_conversation_transcript():
+        """Save the conversation transcript when the session ends."""
+        try:
+            if hasattr(session, 'history'):
+                from datetime import datetime
+                current_date = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"/tmp/transcript_{ctx.room.name}_{current_date}.json"
+                
+                with open(filename, 'w') as f:
+                    import json
+                    json.dump(session.history.to_dict(), f, indent=2)
+                    
+                logger.info(f"Conversation transcript saved to {filename}")
+            else:
+                logger.warning("Could not save transcript - no history property found")
+        except Exception as e:
+            logger.error(f"Error saving transcript: {e}")
 
-    # Add shutdown callback
+    # Add shutdown callbacks
     ctx.add_shutdown_callback(log_usage)
+    ctx.add_shutdown_callback(save_conversation_transcript)
 
     await ctx.wait_for_participant()
 
