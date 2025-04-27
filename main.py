@@ -305,7 +305,7 @@ class ApiQueryAgent(Agent):
             send_summary: Whether to send a summary (True) or the full transcript (False)
         """
         # Add the confirmation message immediately
-        await context.session.say("I will send the email and let you know when it's done.")
+        await context.session.say("Ich werde die E-Mail senden und Sie informieren, wenn es fertig ist.")
         
         logger.info(f"Sending {'summary' if send_summary else 'transcript'} to: {receiver_email}")
         
@@ -424,7 +424,7 @@ class ApiQueryAgent(Agent):
         
         try:
             # API endpoint
-            url = "http://localhost:5000/generate"
+            url = "http://localhost:5100/generate"
             data = {
                 "text": refined_query
             }
