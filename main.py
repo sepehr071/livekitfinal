@@ -589,9 +589,15 @@ async def entrypoint(ctx: JobContext):
         """Save the conversation transcript when the session ends."""
         try:
             if hasattr(session, 'history'):
+                import os
                 from datetime import datetime
+                
+                # Create a 'transcripts' directory in the current working directory if it doesn't exist
+                transcript_dir = os.path.join(os.getcwd(), "transcripts")
+                os.makedirs(transcript_dir, exist_ok=True)
+                
                 current_date = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"/tmp/transcript_{ctx.room.name}_{current_date}.json"
+                filename = os.path.join(transcript_dir, f"transcript_{ctx.room.name}_{current_date}.json")
                 
                 with open(filename, 'w') as f:
                     import json
