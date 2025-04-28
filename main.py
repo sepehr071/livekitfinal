@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import requests
 import re
@@ -25,7 +24,7 @@ from livekit.agents import (
 )
 from livekit.agents.llm import function_tool
 from livekit.agents.voice import MetricsCollectedEvent
-from livekit.plugins import openai, silero, deepgram
+from livekit.plugins import openai, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 logger = logging.getLogger("api-query-agent")
@@ -44,11 +43,11 @@ def is_valid_email(email: str) -> bool:
 
 def format_chat_history(history_dict: Dict) -> str:
     """Format the chat history into a readable text format."""
-    formatted_text = "CONVERSATION HISTORY\n\n"
+    formatted_text = "GESPRÄCHSVERLAUF\n\n"
     
     if not history_dict:
         logger.warning("Empty history dictionary provided")
-        return formatted_text + "No conversation history available."
+        return formatted_text + "Kein Gesprächsverlauf verfügbar."
     
     # Process items according to LiveKit 1.0 format
     items = history_dict.get("items", [])
@@ -80,13 +79,13 @@ def format_chat_history(history_dict: Dict) -> str:
                 for content_item in item.get("content", []):
                     if isinstance(content_item, dict) and "type" in content_item:
                         content_type = content_item.get("type", "unknown")
-                        formatted_text += f"[{content_type} content included]\n"
+                        formatted_text += f"[{content_type} Inhalt enthalten]\n"
         
         return formatted_text
     
     # No recognized format
     logger.warning("No recognized history format found")
-    return formatted_text + "No conversation history available in a recognized format."
+    return formatted_text + "Kein Gesprächsverlauf in einem erkennbaren Format verfügbar."
 
 
 def send_email(receiver_email: str, subject: str, body: str) -> bool:
@@ -99,7 +98,7 @@ def send_email(receiver_email: str, subject: str, body: str) -> bool:
     # 2. Get credentials from environment variables
     sender_email = os.environ.get("EMAIL_SENDER")
     sender_password = os.environ.get("EMAIL_PASSWORD")
-    sender_name = os.environ.get("EMAIL_SENDER_NAME", "Tech Product Assistant")
+    sender_name = os.environ.get("EMAIL_SENDER_NAME", "Caila - Carema Assistent")
     
     # Validate email configuration
     if not sender_email or not sender_password:
@@ -142,25 +141,26 @@ async def generate_conversation_summary(history_dict: Dict) -> str:
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             logger.error("OPENAI_API_KEY is not set in environment variables")
-            return "Unable to generate a summary: API key not configured."
+            return "Die Zusammenfassung konnte nicht generiert werden: API-Schlüssel fehlt."
         
         # Create an OpenAI client
         client = OpenAI()
         
         try:
-            # Create the prompt for summarization
+            # Create the prompt for summarization - completely in German
             prompt = (
-                "Extract factual information about tech products and devices from this conversation. "
-                "Focus on product details, features, specifications, and use cases. "
-                "DO NOT mention 'user said', 'assistant replied', or reference the conversation itself. "
-                "Your summary should:\n\n"
-                "1. Present information as direct, objective statements organized by topic\n"
-                "2. Focus primarily on device specifications, features, and technical details\n"
-                "3. Use bullet points for clear organization of product details\n"
-                "4. Include only substantive technical and product information\n"
-                "5. Omit all conversational elements, questions, and non-product information\n\n"
-                f"CONVERSATION:\n{formatted_history}\n\n"
-                "PRODUCT INFORMATION SUMMARY:"
+                "Extrahiere sachliche Informationen über technische Produkte und Geräte aus diesem Gespräch. "
+                "Arbeite ausschließlich auf Deutsch. Alle extrahierten Informationen MÜSSEN auf Deutsch sein. "
+                "Konzentriere dich auf Produktdetails, Funktionen, technische Daten und Anwendungsfälle. "
+                "Erwähne NICHT 'Benutzer sagte', 'Assistent antwortete' oder verweise auf das Gespräch selbst. "
+                "Deine Zusammenfassung sollte:\n\n"
+                "1. Informationen als direkte, objektive Aussagen darstellen, nach Themen geordnet\n"
+                "2. Sich hauptsächlich auf Gerätespezifikationen, Funktionen und technische Details konzentrieren\n"
+                "3. Aufzählungspunkte für übersichtliche Organisation von Produktdetails verwenden\n"
+                "4. Nur gehaltvolle technische und Produktinformationen enthalten\n"
+                "5. Alle Gesprächselemente, Fragen und nicht produktbezogene Informationen weglassen\n\n"
+                f"GESPRÄCH:\n{formatted_history}\n\n"
+                "PRODUKTINFORMATIONEN ZUSAMMENFASSUNG:"
             )
             
             # Since this is in an async function, we need to use asyncio.to_thread for the synchronous OpenAI call
@@ -169,7 +169,7 @@ async def generate_conversation_summary(history_dict: Dict) -> str:
                 lambda: client.chat.completions.create(
                     model="gpt-4.1-nano-2025-04-14",  # Using the same model as our agent
                     messages=[
-                        {"role": "system", "content": "You are a product information specialist who extracts factual device specifications and features. Your summaries are concise, factual, and focused only on product details."},
+                        {"role": "system", "content": "Du bist ein Produktinformationsspezialist, der sachliche Gerätespezifikationen und Funktionen extrahiert. Deine Zusammenfassungen sind präzise, sachlich und konzentrieren sich ausschließlich auf Produktdetails. Du antwortest IMMER auf Deutsch, unabhängig von der Sprache des Eingabetexts."},
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.2,
@@ -182,14 +182,14 @@ async def generate_conversation_summary(history_dict: Dict) -> str:
                 return summary.strip()
             else:
                 logger.error("Empty response from OpenAI API")
-                return "Unable to generate a summary: empty response from API."
+                return "Zusammenfassung konnte nicht erstellt werden: Leere Antwort vom API-Dienst."
         except Exception as api_error:
             logger.error(f"Error calling OpenAI API: {api_error}")
-            return "Unable to generate a summary: error calling the AI service."
+            return "Zusammenfassung konnte nicht erstellt werden: Fehler bei der Verbindung zum KI-Dienst."
             
     except Exception as e:
         logger.error(f"Error generating conversation summary: {e}")
-        return "Unable to generate a summary of our conversation due to a technical error."
+        return "Leider konnte keine Zusammenfassung unseres Gesprächs aufgrund eines technischen Fehlers erstellt werden."
 
 class ApiQueryAgent(Agent):
     def __init__(self) -> None:
@@ -261,18 +261,15 @@ class ApiQueryAgent(Agent):
     async def on_enter(self):
         # Generate a welcome message when the agent enters the session
         self.session.generate_reply(
-            instructions="""Greet the user enthusiastically IN GERMAN and introduce yourself as Caila, the Carema Interactive Learning Assistant.
-
-            In your German greeting:
-            1. Express how excited you are to help them learn about Carema's devices and solutions
-            2. Mention your expertise in explaining Carema's technology in an accessible, educational way
-            3. Highlight that you can provide detailed specifications, feature comparisons, and use case recommendations for Carema devices
-            4. Clearly state that you specialize exclusively in Carema device-related information
-            5. Let them know you can email conversation summaries or transcripts if they'd like to reference them later
+            instructions="""Create a very brief German greeting (2-3 sentences maximum) that:
             
-            Keep your tone warm, knowledgeable, and educational - like a friendly technology educator eager to share valuable insights about Carema devices.
+            1. Introduces you as Caila, the Carema Assistant
+            2. Mentions you can help with questions about Carema devices and technology
+            3. Has a friendly, approachable tone
             
-            Remember to ALWAYS respond in German, regardless of which language the user speaks to you."""
+            Your greeting should be short , while still being welcoming and establishing your identity.
+            
+            Remember to ALWAYS use German, regardless of which language the user speaks to you."""
         )
 
     async def process_api_response(self, response_data):
@@ -336,18 +333,18 @@ class ApiQueryAgent(Agent):
             else:
                 logger.warning("Session does not have history property - this may be a LiveKit API version issue")
             
-            # Generate content based on preference
+            # Generate content based on preference - using German text as requested
             if send_summary:
                 content = await generate_conversation_summary(history_dict)
-                subject = "Summary of Your Conversation with Carema Assistant"
-                intro = "Here's a summary of our conversation about Carema products:"
+                subject = "Zusammenfassung Ihres Gesprächs mit Caila"
+                intro = "Hier ist eine kleine Zusammenfassung unserer Unterhaltung – kompakt und hilfreich für dich."
             else:
                 content = format_chat_history(history_dict)
-                subject = "Transcript of Your Conversation with Carema Assistant"
-                intro = "Here's the complete transcript of our conversation about Carema products:"
+                subject = "Ihr Gespräch mit Caila"
+                intro = "Wie versprochen findest du hier den vollständigen Verlauf unseres Gesprächs."
             
-            # Format email
-            body = f"Hello,\n\n{intro}\n\n{content}\n\nBest regards,\nYour Carema Product Assistant"
+            # Format email with more friendly German greeting and signature
+            body = f"Hi!\n\n{intro}\n\n{content}\n\nBeste Grüße,\nCaila – von Carema"
             
             # Send email
             success = send_email(receiver_email, subject, body)
@@ -401,8 +398,20 @@ class ApiQueryAgent(Agent):
                   - "Welches Gerät hat die höchste Akkukapazität?" → "Which Carema device has the highest battery capacity?"
                     (incorrect because it added "Carema" when not mentioned by user)
         """
-        # First immediate message
-        await context.session.say("Lassen Sie mich meine Informationen überprüfen, es könnte eine Weile dauern.")
+        # Generate a dynamic reply about searching for information
+        await context.session.generate_reply(
+            instructions="""
+            Create a VERY BRIEF message in German (1-2 sentences maximum) telling the user you're
+            going to search for information and it might take a moment.
+            
+            Keep it conversational, friendly, and SHORT.
+            
+            Some variations you might use (pick ONE or create something similar):
+            - "Einen Moment bitte, ich suche nach den Informationen für Sie."
+            - "Ich schaue in meiner Datenbank nach. Bin gleich wieder da."
+            - "Kurze Suche... ich finde die passenden Daten für Sie."
+            """
+        )
         
         logger.info(f"Refining and querying API with: {query}")
         logger.info(f"Original query: {query}")
@@ -498,7 +507,7 @@ class ApiQueryAgent(Agent):
                 return {
                     "error": error_msg,
                     "details": response.text,
-                    "fallback_response": "I couldn't retrieve the specific information you requested. Could you try asking a more general question about tech products?"
+                    "fallback_response": "Ich konnte die gewünschten Informationen leider nicht abrufen. Könnten Sie vielleicht eine allgemeinere Frage zu technischen Produkten stellen?"
                 }
         except Exception as e:
             error_msg = f"Failed to query API: {str(e)}"
@@ -506,17 +515,17 @@ class ApiQueryAgent(Agent):
             
             return {
                 "error": error_msg,
-                "fallback_response": "I'm having trouble connecting to our product information system. Let me answer with what I know: tech products generally have various specifications like processor speed, memory, storage, display quality, and camera capabilities. If you'd like specific details about a particular device, please try again in a moment."
+                "fallback_response": "Ich habe momentan Schwierigkeiten, eine Verbindung zu unserem Produktinformationssystem herzustellen. Lassen Sie mich mit meinem vorhandenen Wissen antworten: Technische Produkte haben in der Regel verschiedene Spezifikationen wie Prozessorgeschwindigkeit, Arbeitsspeicher, Speicherkapazität, Displayqualität und Kamerafunktionen. Wenn Sie spezifische Details zu einem bestimmten Gerät benötigen, versuchen Sie es bitte in einem Moment noch einmal."
             }
 
 def prewarm(proc: JobProcess):
-    # Configure optimized VAD parameters for better responsiveness
+    # Configure VAD parameters for higher sensitivity to user interruptions
     vad_config = silero.VAD.load(
-        min_speech_duration=0.05,      # Keep default for minimal speech detection
-        min_silence_duration=0.30,     # Reduced from 0.55 for faster response
-        prefix_padding_duration=0.7,  # Slightly reduced from 0.5
-        activation_threshold=0.45,     # Reduced from 0.5 for better sensitivity
-        max_buffered_speech=30.0       # Reduced from 60.0 for efficiency
+        min_speech_duration=0.03,      # Reduced to detect even shorter speech
+        min_silence_duration=0.20,     # Reduced significantly to detect pauses faster
+        prefix_padding_duration=0.5,   # Reduced for quicker response
+        activation_threshold=0.35,     # Lowered significantly for much higher sensitivity
+        max_buffered_speech=25.0       # Slightly reduced for better efficiency
     )
     proc.userdata["vad"] = vad_config
 
@@ -542,10 +551,15 @@ async def entrypoint(ctx: JobContext):
         tts=openai.TTS(
             model="gpt-4o-mini-tts",
             voice="alloy",
-            instructions="Native German speaker with perfect pronunciation; enthusiastic, warm, and educational tone; speaks confidently about technical topics",
+            instructions="Muttersprachliche deutsche Sprecherin mit makelloser Aussprache; begeisterter, warmherziger und lehrhafter Tonfall; spricht selbstbewusst über technische Themen und nutzt natürliche deutsche Sprachmelodie und Betonung",
             speed=0.9
         ),
-        turn_detection=MultilingualModel()
+        # Enhanced interrupt configuration
+        turn_detection=MultilingualModel(),
+        allow_interruptions=True,
+        min_interruption_duration=0.2,  # Reduced from default 0.5s for faster interruption detection
+        min_endpointing_delay=0.3,      # Reduced from default 0.5s for faster response
+        max_endpointing_delay=4.0       # Reduced from default 6.0s to be more responsive
     )
     # Setup metrics collection
     usage_collector = metrics.UsageCollector()
@@ -580,6 +594,37 @@ async def entrypoint(ctx: JobContext):
             logger.info(f"Item content: {text_content[:50]}{'...' if len(text_content) > 50 else ''}")
         except Exception as e:
             logger.error(f"Error processing conversation item: {e}")
+    
+    # Monitor interruptions
+    @session.on("speech_interrupted")
+    def _on_speech_interrupted(event):
+        """Handle interruptions from the user to improve responsiveness."""
+        try:
+            logger.info(f"Agent speech was interrupted by user")
+            # You could add custom logic here to handle user interruptions
+            # For example, adapting the agent's behavior based on frequent interruptions
+        except Exception as e:
+            logger.error(f"Error handling speech interruption: {e}")
+    
+    # Monitor user state changes
+    @session.on("user_state_changed")
+    def _on_user_state_changed(event):
+        """Track user speaking state to improve interruption handling."""
+        try:
+            logger.info(f"User state changed from {event.old_state} to {event.new_state}")
+            # This helps track user behavior for debugging and analyzing interruption patterns
+        except Exception as e:
+            logger.error(f"Error handling user state change: {e}")
+    
+    # Monitor agent state changes
+    @session.on("agent_state_changed")
+    def _on_agent_state_changed(event):
+        """Track agent state to better coordinate with user interruptions."""
+        try:
+            logger.info(f"Agent state changed from {event.old_state} to {event.new_state}")
+            # This helps understand when the agent is transitioning between speaking and listening states
+        except Exception as e:
+            logger.error(f"Error handling agent state change: {e}")
 
     async def log_usage():
         summary = usage_collector.get_summary()
